@@ -29,9 +29,18 @@ app.get('/', (_req, res) => {
 
 /**
  * POST /digest/run
- * Manually trigger the digest pipeline (useful for testing).
+ * Manually trigger the digest pipeline.
+ * Protected by CRON_SECRET — requires Authorization: Bearer <secret> header.
  */
-app.post('/digest/run', async (_req, res) => {
+app.post('/digest/run', async (req, res) => {
+  const auth = req.headers.authorization;
+
+  if (auth !== `Bearer ${config.cron.secret}`) {
+    logger.warn(AGENT, 'Unauthorized /digest/run attempt blocked.');
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
   try {
     logger.info(AGENT, 'Manual digest run triggered via API.');
     await runDigestPipeline();
@@ -72,7 +81,9 @@ app.listen(config.server.port, () => {
   getDatabase();
 
   // Start the cron scheduler
-  startScheduler();
+  if (process.env.ENABLE_INTERNAL_CRON === "true") {
+    startScheduler();
+  }
 });
 
 // Graceful shutdown

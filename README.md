@@ -142,6 +142,12 @@ CRON_SCHEDULE=0 6 * * *
 
 # Server
 PORT=3000
+
+# Internal / External CRON
+ENABLE_INTERNAL_CRON=false/true # true -> local development , false -> production
+
+# Secret token for protecting the /digest/run endpoint
+CRON_SECRET=my_super_secret_key
 ```
 
 ### 4. Build & Start
@@ -212,14 +218,15 @@ npm run dev
 | `GET` | `/auth/google/callback` | OAuth callback — exchanges code for tokens |
 | `GET` | `/auth/accounts` | Lists all connected Gmail accounts |
 | `DELETE` | `/auth/accounts/:id` | Removes a connected Gmail account |
-| `POST` | `/digest/run` | Manually triggers the digest pipeline |
+| `POST` | `/digest/run` | Manually triggers the digest pipeline *(requires `Authorization: Bearer <CRON_SECRET>` header)* |
 | `GET` | `/digest/history` | Returns the last 20 digest run records |
 
 ### Quick Manual Test
 
 ```bash
-# Trigger a digest run manually
-curl -X POST http://localhost:3000/digest/run
+# Trigger a digest run manually (requires CRON_SECRET)
+curl -X POST http://localhost:3000/digest/run \
+  -H "Authorization: Bearer my_super_secret_key"
 
 # Check run history
 curl http://localhost:3000/digest/history

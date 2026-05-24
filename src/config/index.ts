@@ -25,6 +25,7 @@ interface AppConfig {
   };
   cron: {
     schedule: string;
+    secret: string;
   };
   server: {
     port: number;
@@ -57,6 +58,7 @@ const config: AppConfig = {
   },
   cron: {
     schedule: process.env.CRON_SCHEDULE || '0 6 * * *',
+    secret: requireEnv('CRON_SECRET'),
   },
   server: {
     port: parseInt(process.env.PORT || '3000', 10),

@@ -1,0 +1,31 @@
+{
+  "name": "daily-gmail-digest",
+  "version": "1.0.0",
+  "description": "A lightweight, fully autonomous automation service that fetches unread emails from multiple Gmail accounts, filters noise, and delivers a clean daily digest via Telegram and Discord.",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts"
+  },
+  "keywords": ["gmail", "digest", "telegram", "discord", "automation", "email"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "googleapis": "^146.0.0",
+    "node-cron": "^3.0.3",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  }
+}

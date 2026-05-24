@@ -9,11 +9,6 @@ dist/
 .env.local
 .env.*.local
 
-# SQLite database files
-*.db
-*.db-journal
-*.db-wal
-
 # OS generated files
 .DS_Store
 Thumbs.db

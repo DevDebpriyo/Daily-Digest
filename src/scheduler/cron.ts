@@ -1,8 +1,6 @@
 import cron from 'node-cron';
-import { v4 as uuidv4 } from 'uuid';
 import config from '../config';
-import { getDatabase } from '../db/client';
-import { GmailAccount } from '../db/schema';
+import { GmailAccount, DigestRun } from '../db/schema';
 import { getAuthenticatedClient } from '../auth/oauth';
 import { fetchUnreadEmails, ParsedEmail } from '../gmail/fetcher';
 import { filterEmails } from '../gmail/filter';
@@ -51,17 +49,13 @@ export function startScheduler(): void {
  * This can be called by the cron job or manually via an API endpoint.
  */
 export async function runDigestPipeline(): Promise<void> {
-  const runId = uuidv4();
   const startTime = Date.now();
   let status: 'success' | 'partial' | 'failure' = 'success';
   let details = '';
 
   try {
     // Step 1: Load all Gmail accounts from the database
-    const db = getDatabase();
-    const accounts = db
-      .prepare('SELECT * FROM gmail_accounts')
-      .all() as GmailAccount[];
+    const accounts = await GmailAccount.find({}).lean();
 
     if (accounts.length === 0) {
       logger.warn(AGENT, 'No Gmail accounts configured. Sending empty digest.');
@@ -78,7 +72,7 @@ export async function runDigestPipeline(): Promise<void> {
         emptyTelegramDigest
       );
       details = 'No accounts configured.';
-      logRun(runId, status, details);
+      await logRun(status, details);
       return;
     }
 
@@ -94,7 +88,7 @@ export async function runDigestPipeline(): Promise<void> {
 
         // Authenticate with the stored refresh token
         const authClient = await getAuthenticatedClient(
-          account.refresh_token,
+          account.refreshToken,
           config.google.clientId,
           config.google.clientSecret,
           config.google.redirectUri
@@ -156,7 +150,7 @@ export async function runDigestPipeline(): Promise<void> {
         logger.error(AGENT, 'Failed to send failure notification to Telegram.');
       }
 
-      logRun(runId, status, details);
+      await logRun(status, details);
       return;
     }
 
@@ -204,7 +198,7 @@ export async function runDigestPipeline(): Promise<void> {
     logger.error(AGENT, `❌ Digest pipeline failed: ${details}`, error);
   }
 
-  logRun(runId, status, details);
+  await logRun(status, details);
 }
 
 /**
@@ -228,20 +222,12 @@ async function deliverToDiscord(embeds: DiscordEmbed[]): Promise<void> {
 }
 
 /**
- * Records the digest run result in the database.
+ * Records the digest run result in MongoDB.
  */
-function logRun(runId: string, status: string, details: string): void {
+async function logRun(status: 'success' | 'partial' | 'failure', details: string): Promise<void> {
   try {
-    const db = getDatabase();
-    const user = db.prepare('SELECT id FROM users LIMIT 1').get() as
-      | { id: string }
-      | undefined;
-
-    db.prepare(
-      'INSERT INTO digest_runs (id, user_id, executed_at, status, details) VALUES (?, ?, datetime(\'now\'), ?, ?)'
-    ).run(runId, user?.id || null, status, details);
-
-    logger.info(AGENT, `Run logged: ${runId} → ${status}`);
+    const run = await DigestRun.create({ status, details });
+    logger.info(AGENT, `Run logged: ${run.id} → ${status}`);
   } catch (error) {
     logger.error(AGENT, 'Failed to log digest run to database.', error);
   }

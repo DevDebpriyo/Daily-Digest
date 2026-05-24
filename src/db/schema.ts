@@ -1,26 +1,50 @@
+import mongoose, { Schema, Document, Model } from 'mongoose';
+
 /**
- * Schema type definitions mirroring the SQLite tables.
- * Used across the application for type safety.
+ * Gmail Account document interface.
  */
-
-export interface User {
-  id: string;
-  telegram_chat_id: string;
-  created_at: string;
-}
-
-export interface GmailAccount {
-  id: string;
-  user_id: string;
+export interface IGmailAccount extends Document {
   email: string;
-  refresh_token: string;
-  created_at: string;
+  refreshToken: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-export interface DigestRun {
-  id: string;
-  user_id: string | null;
-  executed_at: string;
+const gmailAccountSchema = new Schema<IGmailAccount>(
+  {
+    email: { type: String, required: true, unique: true },
+    refreshToken: { type: String, required: true },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const GmailAccount: Model<IGmailAccount> = mongoose.model<IGmailAccount>(
+  'GmailAccount',
+  gmailAccountSchema
+);
+
+/**
+ * Digest Run document interface.
+ */
+export interface IDigestRun extends Document {
   status: 'success' | 'partial' | 'failure';
   details: string | null;
+  createdAt: Date;
 }
+
+const digestRunSchema = new Schema<IDigestRun>(
+  {
+    status: { type: String, required: true, enum: ['success', 'partial', 'failure'] },
+    details: { type: String, default: null },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const DigestRun: Model<IDigestRun> = mongoose.model<IDigestRun>(
+  'DigestRun',
+  digestRunSchema
+);

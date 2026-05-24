@@ -21,7 +21,7 @@ interface AppConfig {
     webhookUrl: string | undefined;
   };
   database: {
-    url: string;
+    uri: string;
   };
   cron: {
     schedule: string;
@@ -54,7 +54,7 @@ const config: AppConfig = {
     webhookUrl: process.env.DISCORD_WEBHOOK_URL || undefined,
   },
   database: {
-    url: process.env.DATABASE_URL || 'file:./dev.db',
+    uri: requireEnv('MONGODB_URI'),
   },
   cron: {
     schedule: process.env.CRON_SCHEDULE || '0 6 * * *',

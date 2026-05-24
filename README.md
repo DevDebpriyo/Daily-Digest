@@ -2,19 +2,22 @@
 
 A lightweight, fully autonomous automation service that connects multiple Gmail accounts, fetches unread emails daily, filters out noise, and delivers a clean aggregated digest to **Telegram** and **Discord** — completely hands-free.
 
+Deployed on **Render** with **MongoDB Atlas** for persistent cloud storage and **cron-job.org** for external scheduling.
+
 ---
 
 ## ✨ Features
 
 - **Multi-Account Support** — Connect multiple Gmail accounts via Google OAuth 2.0
-- **Daily Automated Digest** — Runs on a configurable cron schedule (default: 6:00 AM daily)
+- **Daily Automated Digest** — Runs via external cron (production) or internal scheduler (development)
 - **Deterministic Filtering** — Strips out promotions, social updates, newsletters, and spam without AI/NLP
 - **Dual Delivery** — Sends digest to both Telegram and Discord simultaneously
 - **Rich Discord Embeds** — Each account gets a color-coded embed card for instant visual differentiation
 - **Telegram HTML Formatting** — Clean, structured digest with emoji and grouped sections
 - **Failure Isolation** — If one delivery channel fails, the other still works
 - **Retry Logic** — Automatic retry with 3-second delay on delivery failures
-- **Manual Trigger** — Run the digest pipeline anytime via a simple API call
+- **Protected API** — `/digest/run` endpoint secured with Bearer token authentication
+- **Cloud Persistence** — MongoDB Atlas ensures data survives container restarts and redeploys
 - **Run History** — Track past digest executions via the API
 - **Graceful Error Handling** — Partial failures, expired tokens, and empty inboxes are all handled cleanly
 
@@ -35,14 +38,24 @@ The system operates as **5 autonomous agents** coordinating through a pipeline:
 ### Pipeline Flow
 
 ```
-Cron Trigger (daily)
-  → Load Gmail accounts from DB
+Cron Trigger (external or internal)
+  → Load Gmail accounts from MongoDB
   → For each account: Authenticate → Fetch unread emails → Filter noise
   → Format digest (Telegram HTML + Discord Embeds)
   → Deliver to Discord
   → Deliver to Telegram
-  → Log run result to DB
+  → Log run result to MongoDB
 ```
+
+### Production Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Runtime | Node.js + TypeScript |
+| Database | MongoDB Atlas (cloud) |
+| Hosting | Render (free tier) |
+| Scheduling | cron-job.org (external) |
+| Delivery | Telegram Bot API + Discord Webhooks |
 
 ---
 
@@ -57,8 +70,8 @@ daily-gmail-digest/
 │   ├── config/            # Environment variable validation
 │   │   └── index.ts       # Typed config with startup validation
 │   ├── db/                # Database layer
-│   │   ├── client.ts      # SQLite singleton with auto-schema initialization
-│   │   └── schema.ts      # TypeScript type definitions for DB tables
+│   │   ├── client.ts      # MongoDB connection via mongoose
+│   │   └── schema.ts      # Mongoose models (GmailAccount, DigestRun)
 │   ├── digest/            # Digest formatting
 │   │   └── formatter.ts   # Telegram (HTML) and Discord (embeds) formatters
 │   ├── discord/           # Discord delivery
@@ -72,7 +85,7 @@ daily-gmail-digest/
 │   │   └── sender.ts      # Bot API delivery with retry & message chunking
 │   ├── utils/             # Shared utilities
 │   │   └── logger.ts      # Structured logging with agent tags
-│   └── server.ts          # Main entry point (Express + cron startup)
+│   └── server.ts          # Main entry point (Express + MongoDB + cron startup)
 ├── docs/                  # Project planning documents
 │   ├── AGENTS.md
 │   ├── ARCHITECTURE.md
@@ -97,14 +110,15 @@ daily-gmail-digest/
 - **Node.js** v18+ (required for native `fetch` support)
 - **npm** v8+
 - A **Google Cloud Project** with Gmail API enabled
+- A **MongoDB Atlas** cluster ([free tier available](https://www.mongodb.com/atlas))
 - A **Telegram Bot** (created via [@BotFather](https://t.me/BotFather))
 - A **Discord Webhook URL** (optional — created in Discord channel settings)
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/daily-gmail-digest.git
-cd daily-gmail-digest
+git clone https://github.com/DevDebpriyo/Daily-Digest.git
+cd Daily-Digest
 ```
 
 ### 2. Install Dependencies
@@ -134,8 +148,8 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id
 # Discord Webhook (optional — skip to disable Discord delivery)
 DISCORD_WEBHOOK_URL=your_discord_webhook_url
 
-# Database
-DATABASE_URL=file:./dev.db
+# MongoDB Atlas
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/daily-digest
 
 # Scheduler (cron expression — default: every day at 6:00 AM)
 CRON_SCHEDULE=0 6 * * *
@@ -144,7 +158,7 @@ CRON_SCHEDULE=0 6 * * *
 PORT=3000
 
 # Internal / External CRON
-ENABLE_INTERNAL_CRON=false/true # true -> local development , false -> production
+ENABLE_INTERNAL_CRON=true  # true -> local development, false -> production
 
 # Secret token for protecting the /digest/run endpoint
 CRON_SECRET=my_super_secret_key
@@ -187,6 +201,16 @@ npm run dev
 6. Set **Application type** to **Web application**
 7. Add `http://localhost:3000/auth/google/callback` as an **Authorized redirect URI**
 8. Copy the **Client ID** and **Client Secret** into your `.env` file
+
+### MongoDB Atlas Setup
+
+1. Go to [MongoDB Atlas](https://www.mongodb.com/atlas) and create a free account
+2. Create a new **Shared Cluster** (M0 free tier works fine)
+3. Go to **Database Access** → Add a database user with read/write permissions
+4. Go to **Network Access** → Add `0.0.0.0/0` to allow connections from anywhere (required for Render)
+5. Go to **Database** → Click **Connect** → Choose **Connect your application**
+6. Copy the connection string and paste it into your `.env` as `MONGODB_URI`
+7. Replace `<password>` with your database user's password
 
 ### Telegram Bot Setup
 
@@ -239,21 +263,27 @@ curl http://localhost:3000/auth/accounts
 
 ## 🗃️ Database
 
-SQLite is used for local persistence with the following tables:
+**MongoDB Atlas** is used for cloud persistence with the following collections:
 
-| Table | Purpose |
-|-------|---------|
-| `users` | User records with Telegram chat IDs |
-| `gmail_accounts` | Connected Gmail accounts with encrypted refresh tokens |
-| `digest_runs` | Audit log of every pipeline execution (time, status, details) |
+| Collection | Purpose |
+|------------|---------|
+| `gmailaccounts` | Connected Gmail accounts with OAuth refresh tokens |
+| `digestruns` | Audit log of every pipeline execution (time, status, details) |
 
-The database file is created automatically on first startup.
+Data persists permanently in the cloud — container restarts and redeploys on Render do not affect stored data.
 
 ---
 
 ## 🔧 Configuration
 
-### Cron Schedule
+### Cron Scheduling
+
+The application supports two scheduling modes:
+
+| Mode | `ENABLE_INTERNAL_CRON` | How It Works |
+|------|------------------------|--------------|
+| **Production** | `false` | External service (e.g., [cron-job.org](https://cron-job.org)) calls `POST /digest/run` with the `CRON_SECRET` |
+| **Development** | `true` | Internal `node-cron` runs on the `CRON_SCHEDULE` expression |
 
 The `CRON_SCHEDULE` environment variable accepts standard cron expressions:
 
@@ -285,35 +315,50 @@ The Bouncer agent filters emails using deterministic rules — no AI required:
 | Empty inbox (no new emails) | Sends a "No new emails today" confirmation digest |
 | Missing Discord webhook | Silently skips Discord delivery, Telegram still works |
 | Long message exceeds limits | Telegram: auto-splits at 4096 chars; Discord: batches at 10 embeds |
+| MongoDB connection fails | Application logs error and exits — will be restarted by Render |
 
 ---
 
 ## 🚢 Deployment
 
-This service requires **24/7 uptime** for the cron scheduler. Recommended platforms:
+### Render (Recommended)
 
-- [Railway](https://railway.app/)
-- [Render](https://render.com/)
-- [Fly.io](https://fly.io/)
-- Any VPS (e.g., DigitalOcean, Linode, Hetzner)
+1. Connect your GitHub repository to [Render](https://render.com/)
+2. Create a new **Web Service**
+3. Set **Build Command**: `npm install && npm run build`
+4. Set **Start Command**: `npm start`
+5. Add all environment variables in the Render dashboard
+6. Set `ENABLE_INTERNAL_CRON=false` (use external cron)
+
+### External Cron Setup (cron-job.org)
+
+1. Go to [cron-job.org](https://cron-job.org) and create a free account
+2. Create a new cron job:
+   - **URL**: `https://your-app.onrender.com/digest/run`
+   - **Method**: `POST`
+   - **Schedule**: Your desired frequency (e.g., daily at 6:00 AM)
+   - **Headers**: Add `Authorization: Bearer <your_CRON_SECRET>`
+3. Save and enable the job
+
+> **Why external cron?** Render free tier instances sleep after inactivity. External cron ensures the digest runs reliably even if the instance was sleeping.
 
 ### Deploy Checklist
 
-1. Set all environment variables on your hosting platform
-2. Ensure Node.js v18+ is available
-3. Run `npm install && npm run build`
-4. Start with `npm start`
-5. Verify health: `curl https://your-domain.com/`
-
-> **Security Reminder:** Never commit your `.env` file. All secrets should be configured via your hosting platform's environment variable management.
+1. ✅ MongoDB Atlas cluster created and configured
+2. ✅ All environment variables set on Render
+3. ✅ `ENABLE_INTERNAL_CRON=false` for production
+4. ✅ External cron job configured with correct URL and Bearer token
+5. ✅ Gmail accounts connected via `/auth/google`
+6. ✅ Verify health: `curl https://your-app.onrender.com/`
 
 ---
 
 ## 🛡️ Security
 
-- **OAuth Tokens** — Refresh tokens are stored in the SQLite database on the server; never exposed to any frontend
-- **Secrets** — All credentials live in `.env` which is excluded from version control via `.gitignore`
+- **OAuth Tokens** — Refresh tokens are stored in MongoDB Atlas; never exposed to any frontend
+- **Secrets** — All credentials live in `.env` (local) or platform env vars (production), excluded from version control via `.gitignore`
 - **Gmail Scope** — Only `gmail.readonly` is requested — the app cannot send, delete, or modify emails
+- **Endpoint Protection** — `/digest/run` is protected by Bearer token authentication
 - **No External Dependencies for HTTP** — Telegram and Discord delivery use native `fetch` — no third-party HTTP libraries
 
 ---

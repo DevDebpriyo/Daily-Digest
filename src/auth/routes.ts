@@ -1,9 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import { google } from 'googleapis';
 import config from '../config';
 import { getAuthUrl, exchangeCodeForTokens, createOAuth2Client } from './oauth';
-import { getDatabase } from '../db/client';
+import { GmailAccount } from '../db/schema';
 import { logger } from '../utils/logger';
 
 const AGENT = 'Auth-Routes';
@@ -80,37 +79,19 @@ router.get('/auth/google/callback', async (req: Request, res: Response) => {
 
     logger.info(AGENT, `Authenticated Gmail account: ${email}`);
 
-    // Store in the database
-    const db = getDatabase();
-
-    // Check if this email already exists
-    const existingAccount = db
-      .prepare('SELECT id FROM gmail_accounts WHERE email = ?')
-      .get(email) as { id: string } | undefined;
+    // Upsert: update if exists, create if not
+    const existingAccount = await GmailAccount.findOne({ email });
 
     if (existingAccount) {
-      // Update the refresh token for the existing account
-      db.prepare('UPDATE gmail_accounts SET refresh_token = ? WHERE email = ?')
-        .run(tokens.refresh_token, email);
+      existingAccount.refreshToken = tokens.refresh_token;
+      await existingAccount.save();
       logger.info(AGENT, `Updated refresh token for existing account: ${email}`);
     } else {
-      // Ensure a default user exists (single-user mode for V1)
-      let user = db.prepare('SELECT id FROM users LIMIT 1').get() as { id: string } | undefined;
-
-      if (!user) {
-        const userId = uuidv4();
-        db.prepare('INSERT INTO users (id, telegram_chat_id) VALUES (?, ?)')
-          .run(userId, config.telegram.chatId);
-        user = { id: userId };
-        logger.info(AGENT, `Created default user with id: ${userId}`);
-      }
-
-      // Insert the new Gmail account
-      const accountId = uuidv4();
-      db.prepare(
-        'INSERT INTO gmail_accounts (id, user_id, email, refresh_token) VALUES (?, ?, ?, ?)'
-      ).run(accountId, user.id, email, tokens.refresh_token);
-      logger.info(AGENT, `Stored new Gmail account: ${email} (id: ${accountId})`);
+      await GmailAccount.create({
+        email,
+        refreshToken: tokens.refresh_token,
+      });
+      logger.info(AGENT, `Stored new Gmail account: ${email}`);
     }
 
     res.status(200).json({
@@ -129,12 +110,9 @@ router.get('/auth/google/callback', async (req: Request, res: Response) => {
  * 
  * Lists all connected Gmail accounts (emails only, no tokens).
  */
-router.get('/auth/accounts', (_req: Request, res: Response) => {
+router.get('/auth/accounts', async (_req: Request, res: Response) => {
   try {
-    const db = getDatabase();
-    const accounts = db
-      .prepare('SELECT id, email, created_at FROM gmail_accounts')
-      .all();
+    const accounts = await GmailAccount.find({}, 'email createdAt').lean();
     res.json({ accounts });
   } catch (error) {
     logger.error(AGENT, 'Failed to list accounts.', error);
@@ -147,14 +125,11 @@ router.get('/auth/accounts', (_req: Request, res: Response) => {
  * 
  * Removes a connected Gmail account by its ID.
  */
-router.delete('/auth/accounts/:id', (req: Request, res: Response) => {
+router.delete('/auth/accounts/:id', async (req: Request, res: Response) => {
   try {
-    const db = getDatabase();
-    const result = db
-      .prepare('DELETE FROM gmail_accounts WHERE id = ?')
-      .run(req.params.id);
+    const result = await GmailAccount.deleteOne({ _id: req.params.id });
 
-    if (result.changes === 0) {
+    if (result.deletedCount === 0) {
       res.status(404).json({ error: 'Account not found.' });
       return;
     }

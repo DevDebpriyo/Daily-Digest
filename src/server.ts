@@ -2,7 +2,8 @@ import express from 'express';
 import config from './config';
 import authRoutes from './auth/routes';
 import { startScheduler, runDigestPipeline } from './scheduler/cron';
-import { getDatabase, closeDatabase } from './db/client';
+import { connectDatabase, closeDatabase } from './db/client';
+import { DigestRun } from './db/schema';
 import { logger } from './utils/logger';
 
 const AGENT = 'Server';
@@ -55,14 +56,13 @@ app.post('/digest/run', async (req, res) => {
  * GET /digest/history
  * Returns recent digest run history.
  */
-app.get('/digest/history', (_req, res) => {
+app.get('/digest/history', async (_req, res) => {
   try {
-    const db = getDatabase();
-    const runs = db
-      .prepare(
-        'SELECT id, executed_at, status, details FROM digest_runs ORDER BY executed_at DESC LIMIT 20'
-      )
-      .all();
+    const runs = await DigestRun.find({})
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select('status details createdAt')
+      .lean();
     res.json({ runs });
   } catch (error) {
     logger.error(AGENT, 'Failed to fetch digest history.', error);
@@ -70,33 +70,46 @@ app.get('/digest/history', (_req, res) => {
   }
 });
 
-// Start the server
-app.listen(config.server.port, () => {
-  logger.info(AGENT, `🚀 Daily Gmail Digest server running on port ${config.server.port}`);
-  logger.info(AGENT, `📋 Auth URL: http://localhost:${config.server.port}/auth/google`);
-  logger.info(AGENT, `📋 Manual run: POST http://localhost:${config.server.port}/digest/run`);
-  logger.info(AGENT, `📋 Run history: GET http://localhost:${config.server.port}/digest/history`);
+/**
+ * Start the application.
+ * Connects to MongoDB first, then starts the Express server.
+ */
+async function start(): Promise<void> {
+  try {
+    // Connect to MongoDB Atlas
+    await connectDatabase(config.database.uri);
 
-  // Initialize the database on startup
-  getDatabase();
+    // Start the Express server
+    app.listen(config.server.port, () => {
+      logger.info(AGENT, `🚀 Daily Gmail Digest server running on port ${config.server.port}`);
+      logger.info(AGENT, `📋 Auth URL: http://localhost:${config.server.port}/auth/google`);
+      logger.info(AGENT, `📋 Manual run: POST http://localhost:${config.server.port}/digest/run`);
+      logger.info(AGENT, `📋 Run history: GET http://localhost:${config.server.port}/digest/history`);
 
-  // Start the cron scheduler
-  if (process.env.ENABLE_INTERNAL_CRON === "true") {
-    startScheduler();
+      // Start the cron scheduler
+      if (process.env.ENABLE_INTERNAL_CRON === 'true') {
+        startScheduler();
+      }
+    });
+  } catch (error) {
+    logger.error(AGENT, 'Failed to start application.', error);
+    process.exit(1);
   }
-});
+}
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info(AGENT, 'Received SIGINT. Shutting down gracefully...');
-  closeDatabase();
+  await closeDatabase();
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info(AGENT, 'Received SIGTERM. Shutting down gracefully...');
-  closeDatabase();
+  await closeDatabase();
   process.exit(0);
 });
+
+start();
 
 export default app;
